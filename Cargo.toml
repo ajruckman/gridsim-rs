@@ -1,0 +1,15 @@
+[package]
+name = "gridsim"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+blake3 = "0"
+walkdir = "2"
+rand = "0"
+
+[profile.release]
+debug = 1
+debuginfo-level = 1
