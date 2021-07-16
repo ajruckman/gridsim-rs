@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
+use std::ops::Index;
 
 pub struct Point {
     x: isize,
@@ -10,6 +13,13 @@ pub struct Point {
 impl Point {
     pub fn new(x: isize, z: isize) -> Self {
         Self { x, z }
+    }
+
+    pub fn copy(p: &Point) -> Self {
+        Self {
+            x: p.x,
+            z: p.z,
+        }
     }
 }
 
@@ -29,6 +39,27 @@ pub struct GridLength {
     z: usize,
 }
 
+pub struct Update<T>
+    where T: Default + Clone + Display
+{
+    p: Point,
+    f: fn(Option<&T>) -> Option<T>,
+
+    dummy: PhantomData<T>,
+}
+
+impl<T> Update<T>
+    where T: Default + Clone + Display,
+{
+    pub fn new(p: Point, f: fn(Option<&T>) -> Option<T>) -> Self {
+        Self {
+            p,
+            f,
+            dummy: PhantomData,
+        }
+    }
+}
+
 impl GridLength {
     pub fn new(x: usize, z: usize) -> Self {
         Self { x, z }
@@ -39,6 +70,7 @@ impl Point {
     fn to_subgrid_index(&self, l_i: isize) -> SubGridIndex {
         SubGridIndex::new(div_neg_isize(self.x, l_i), div_neg_isize(self.z, l_i))
     }
+
     fn to_subgrid_point(&self, l_i: isize) -> SubGridPoint {
         SubGridPoint::new(self.x.rem_euclid(l_i) as usize, self.z.rem_euclid(l_i) as usize)
     }
@@ -74,6 +106,10 @@ impl Point {
                 d_y -= 1;
             }
         }
+
+        // for p in &r {
+        //     println!("{} -> {}", self, p);
+        // }
 
         r
     }
@@ -118,17 +154,28 @@ impl Point {
     }
 }
 
-pub struct Grid<T, const L: usize> where T: Default + Display {
+pub struct Grid<T, const L: usize> where T: Default + Clone + Display {
     values: HashMap<SubGridIndex, SubGrid<T, L>>,
 }
 
-impl<T, const L: usize> Grid<T, L> where T: Default + Display {
+impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
     pub const L_I: isize = L as isize;
 
     pub fn new() -> Grid<T, L> {
         Grid {
             values: HashMap::new(),
         }
+    }
+
+    fn clone(old: &HashMap<SubGridIndex, SubGrid<T, L>>) -> Grid<T, L> {
+        let mut values = HashMap::new();
+
+        for (k, v) in old {
+            let clone = (*v).clone();
+            values.insert(SubGridIndex::new(k.x, k.z), clone);
+        }
+
+        Grid { values }
     }
 
     fn find_subgrid_bounds(&self) -> (SubGridIndex, SubGridIndex) {
@@ -154,6 +201,58 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Display {
         let range_z = ((max_sub.z - min_sub.z) as usize) * L + L;
 
         GridLength::new(range_x, range_z)
+    }
+
+    pub fn tick<FVisit, FUpdate>(&mut self, visitor: FVisit, updater: FUpdate)
+        where FVisit: Fn(&Point) -> Vec<Point>,
+              FUpdate: Fn(&Point, Vec<Option<&T>>, Option<&T>) -> Vec<Update<T>>
+    {
+        // let mut new = Grid::clone(&self.values);
+        // let mut values = &self.values;
+
+        let mut updates = Vec::new();
+
+        for (sub_index, sub) in &self.values {
+            let start_x = sub_index.x * Grid::<T, L>::L_I;
+            let start_z = sub_index.z * Grid::<T, L>::L_I;
+
+            for x in 0..Grid::<T, L>::L_I {
+                for z in 0..Grid::<T, L>::L_I {
+                    let point = Point::new(start_x + x, start_z + z);
+                    let value = Some(self.get_known(sub, &point));
+
+                    let neighbors = visitor(&point);
+
+                    let mut neighbor_values = Vec::new();
+
+                    for neighbor in neighbors {
+                        neighbor_values.push(self.get(&neighbor));
+                    }
+
+                    updates.append(&mut updater(&point, neighbor_values, value));
+
+                    // println!("> [{} {}] {}+{}, {}+{} = {}", sub_index.x, sub_index.z, start_x, x, start_z, z, point);
+
+                    //
+                    // for p in points {
+                    // self.get_or_create_subgrid_values(&values);
+                    // values.push((p, self.get(&p)));
+                    // }
+                    //
+                    // let y = self.get(&Point::new());
+                    // mutator(neighbor_values, &point, value, &mut new);
+                }
+            }
+        }
+
+        //
+
+        for update in updates {
+            let old = self.get(&update.p);
+            let new = (update.f)(old);
+
+            self.set(&update.p, new.unwrap_or(T::default()));
+        }
     }
 
     pub fn print<F>(&self, should_display: F) where F: Fn(&T) -> bool {
@@ -200,7 +299,20 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Display {
         println!("+{}+", "-".repeat(grid_length.x));
     }
 
-    pub fn get(&mut self, p: &Point) -> &mut T {
+    pub fn get(&self, p: &Point) -> Option<&T> {
+        match self.get_subgrid(p) {
+            None => None,
+            Some(sub) => {
+                Some(sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I)))
+            }
+        }
+    }
+
+    pub fn get_known<'a>(&self, sub: &'a SubGrid<T, L>, p: &Point) -> &'a T {
+        sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I))
+    }
+
+    pub fn get_mut(&mut self, p: &Point) -> &mut T {
         let sub = self.get_or_create_subgrid(p);
 
         sub.get_mut(&p.to_subgrid_point(Grid::<T, L>::L_I))
@@ -212,10 +324,12 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Display {
         sub.set(&p.to_subgrid_point(Grid::<T, L>::L_I), v);
     }
 
+    fn get_subgrid(&self, p: &Point) -> Option<&SubGrid<T, L>> {
+        self.values.get(&p.to_subgrid_index(Grid::<T, L>::L_I))
+    }
+
     fn get_or_create_subgrid(&mut self, p: &Point) -> &mut SubGrid<T, L> {
-        self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert_with(|| {
-            SubGrid::new()
-        })
+        self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert(SubGrid::new())
     }
 }
 
@@ -242,41 +356,26 @@ impl SubGridPoint {
     }
 }
 
-struct SubGrid<T, const L: usize> where T: Default {
+#[derive(Clone)]
+struct SubGrid<T, const L: usize> where T: Default + Clone {
     values: [[T; L]; L],
 }
 
-impl<T, const L: usize> SubGrid<T, L> where T: Default {
+impl<T, const L: usize> SubGrid<T, L> where T: Default + Clone {
     pub const L_I: isize = L as isize;
 
     fn new() -> SubGrid<T, L> {
-        let mut values: [[MaybeUninit<T>; L]; L] = unsafe {
-            MaybeUninit::uninit().assume_init()
-        };
-
-        unsafe {
-            for col in &mut values[..] {
-                let mut row: [MaybeUninit<T>; L] = MaybeUninit::uninit().assume_init();
-
-                for col in &mut row[..] {
-                    *col = MaybeUninit::new(T::default());
-                }
-
-                *col = row;
-            }
-        }
-
-        let transmuted = unsafe { std::mem::transmute_copy(&values) };
-
-        std::mem::forget(values);
-
         SubGrid {
-            values: transmuted,
+            values: allocate_2d(),
         }
     }
 
     fn get(&self, p: &SubGridPoint) -> &T {
         &self.values[p.x][p.z]
+    }
+
+    fn get_ro(&self, p: &SubGridPoint) -> T {
+        self.values[p.x][p.z].clone()
     }
 
     fn get_mut(&mut self, p: &SubGridPoint) -> &mut T {
@@ -294,4 +393,24 @@ pub fn div_neg_isize(a: isize, b: isize) -> isize {
     } else {
         (a - b + 1) / b
     }
+}
+
+fn allocate_2d<T, const L: usize>() -> [[T; L]; L] where T: Default {
+    let mut values: [[MaybeUninit<T>; L]; L] = unsafe {
+        MaybeUninit::uninit().assume_init()
+    };
+
+    unsafe {
+        for col in &mut values[..] {
+            let mut row: [MaybeUninit<T>; L] = MaybeUninit::uninit().assume_init();
+
+            for col in &mut row[..] {
+                *col = MaybeUninit::new(T::default());
+            }
+
+            *col = row;
+        }
+    }
+
+    unsafe { std::mem::transmute_copy(&values) }
 }
