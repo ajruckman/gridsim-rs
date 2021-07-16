@@ -1,4 +1,3 @@
-
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
@@ -44,8 +43,6 @@ pub struct Update<T>
 {
     p: Point,
     f: fn(Option<&T>) -> Option<T>,
-
-    dummy: PhantomData<T>,
 }
 
 impl<T> Update<T>
@@ -55,7 +52,6 @@ impl<T> Update<T>
         Self {
             p,
             f,
-            dummy: PhantomData,
         }
     }
 }
@@ -203,14 +199,29 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         GridLength::new(range_x, range_z)
     }
 
-    pub fn tick<FVisit, FUpdate>(&mut self, visitor: FVisit, updater: FUpdate)
+    fn find_grid_bounds(&self) -> (Point, Point) {
+        let (min_sub, max_sub) = self.find_subgrid_bounds();
+
+        let min_x = min_sub.x * Grid::<T, L>::L_I;
+        let min_z = min_sub.z * Grid::<T, L>::L_I;
+        let max_x = max_sub.x * Grid::<T, L>::L_I;
+        let max_z = max_sub.z * Grid::<T, L>::L_I;
+
+        (Point::new(min_x, min_z), Point::new(max_x, max_z))
+    }
+
+    pub fn tick<FVisit, FUpdate>(&mut self, pad: isize, visitor: FVisit, updater: FUpdate)
         where FVisit: Fn(&Point) -> Vec<Point>,
               FUpdate: Fn(&Point, Vec<Option<&T>>, Option<&T>) -> Vec<Update<T>>
     {
-        // let mut new = Grid::clone(&self.values);
-        // let mut values = &self.values;
-
         let mut updates = Vec::new();
+
+        // let (min_sub, max_sub) = self.find_subgrid_bounds();
+        // let grid_length = self.find_grid_length();
+
+        // Fast
+
+        let mut fast = HashSet::new();
 
         for (sub_index, sub) in &self.values {
             let start_x = sub_index.x * Grid::<T, L>::L_I;
@@ -219,7 +230,7 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
             for x in 0..Grid::<T, L>::L_I {
                 for z in 0..Grid::<T, L>::L_I {
                     let point = Point::new(start_x + x, start_z + z);
-                    let value = Some(self.get_known(sub, &point));
+                    let value = Some(self.get_in_subgrid(sub, &point));
 
                     let neighbors = visitor(&point);
 
@@ -230,18 +241,35 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
                     }
 
                     updates.append(&mut updater(&point, neighbor_values, value));
-
-                    // println!("> [{} {}] {}+{}, {}+{} = {}", sub_index.x, sub_index.z, start_x, x, start_z, z, point);
-
-                    //
-                    // for p in points {
-                    // self.get_or_create_subgrid_values(&values);
-                    // values.push((p, self.get(&p)));
-                    // }
-                    //
-                    // let y = self.get(&Point::new());
-                    // mutator(neighbor_values, &point, value, &mut new);
                 }
+            }
+
+            fast.insert(sub_index);
+        }
+
+        // Accurate
+
+        let (min, max) = self.find_grid_bounds();
+
+        for x in (min.x - pad)..(max.x + pad) {
+            for z in (min.z - pad)..(max.z + pad) {
+                let point = Point::new(x, z);
+
+                let sub_index = point.to_subgrid_index(Grid::<T, L>::L_I);
+                if fast.contains(&sub_index) {
+                    continue;
+                }
+
+                let neighbors = visitor(&point);
+                let mut neighbor_values = Vec::new();
+
+                for neighbor in neighbors {
+                    neighbor_values.push(self.get(&neighbor));
+                }
+
+                //
+
+                updates.append(&mut updater(&point, neighbor_values, Some(T::default()).as_ref()));
             }
         }
 
@@ -308,18 +336,24 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         }
     }
 
-    pub fn get_known<'a>(&self, sub: &'a SubGrid<T, L>, p: &Point) -> &'a T {
+    pub fn get_or_expand(&mut self, p: &Point) -> &T {
+        let sub = self.get_subgrid_or_expand(p);
+
         sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I))
     }
 
-    pub fn get_mut(&mut self, p: &Point) -> &mut T {
-        let sub = self.get_or_create_subgrid(p);
-
-        sub.get_mut(&p.to_subgrid_point(Grid::<T, L>::L_I))
+    pub fn get_in_subgrid<'a>(&self, sub: &'a SubGrid<T, L>, p: &Point) -> &'a T {
+        sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I))
     }
 
+    // pub fn get_mut(&mut self, p: &Point) -> &mut T {
+    //     let sub = self.get_or_create_subgrid(p);
+    //
+    //     sub.get_mut(&p.to_subgrid_point(Grid::<T, L>::L_I))
+    // }
+
     pub fn set(&mut self, p: &Point, v: T) {
-        let sub = self.get_or_create_subgrid(p);
+        let sub = self.get_subgrid_or_expand(p);
 
         sub.set(&p.to_subgrid_point(Grid::<T, L>::L_I), v);
     }
@@ -328,7 +362,7 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         self.values.get(&p.to_subgrid_index(Grid::<T, L>::L_I))
     }
 
-    fn get_or_create_subgrid(&mut self, p: &Point) -> &mut SubGrid<T, L> {
+    fn get_subgrid_or_expand(&mut self, p: &Point) -> &mut SubGrid<T, L> {
         self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert(SubGrid::new())
     }
 }

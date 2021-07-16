@@ -44,8 +44,8 @@ fn main() {
     grid.set(&grid::Point::new(0, 0), 0);
 
     for _ in 0..512 {
-        let x: isize = r.gen_range(-32..=31);
-        let z: isize = r.gen_range(-16..=15);
+        let x: isize = r.gen_range(-32..32);
+        let z: isize = r.gen_range(-8..8);
 
         grid.set(&grid::Point::new(x, z), 1);
     }
@@ -56,8 +56,8 @@ fn main() {
 
     let start = Instant::now();
 
-    for i in 0..100000 {
-        grid.tick(|point| {
+    for i in 0..5000 {
+        grid.tick(5, |point| {
             point.moore_neighbors(1, false)
         }, |point, neighbors, old| {
             let mut r = Vec::new();
@@ -67,7 +67,7 @@ fn main() {
             match old {
                 None | Some(0) => {
                     if live == 3 {
-                        r.push(Update::new(Point::copy(point), |_| Some(01)));
+                        r.push(Update::new(Point::copy(point), |_| Some(1)));
                     }
                 }
                 Some(v) => {
@@ -92,9 +92,13 @@ fn main() {
             r
         });
 
+        // println!("{}", i);
+
         //
 
-        grid.print(|v| v != &0);
+        // if i % 99 == 0 {
+        //     grid.print(|v| v != &0);
+        // }
     }
 
     println!("{:?}", start.elapsed());
