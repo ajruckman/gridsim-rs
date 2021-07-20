@@ -9,6 +9,8 @@ edition = "2018"
 blake3 = "0"
 walkdir = "2"
 rand = "0"
+lazy_static = "1.4"
+lru = "0.6"
 
 [profile.release]
 debug = 1

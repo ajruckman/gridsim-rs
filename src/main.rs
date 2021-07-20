@@ -1,11 +1,31 @@
 #![feature(fn_traits)]
 
-use rand::{Rng, SeedableRng};
-use rand::prelude::StdRng;
-use crate::grid::{Update, Point};
+use std::fs::File;
 use std::time::Instant;
 
+use lazy_static::lazy_static;
+use rand::{Rng, SeedableRng};
+use rand::prelude::StdRng;
+
+use crate::grid2::{Offset, Point, Update};
+
 mod grid;
+mod grid2;
+
+lazy_static! {
+    static ref MOORE_NEIGHBORS: Vec<Offset> = {
+        let mut n = Vec::new();
+        n.push(Offset::new(-1, -1));
+        n.push(Offset::new(-1, 0));
+        n.push(Offset::new(-1, 1));
+        n.push(Offset::new(0, -1));
+        n.push(Offset::new(0, 1));
+        n.push(Offset::new(1, -1));
+        n.push(Offset::new(1, 0));
+        n.push(Offset::new(1, 1));
+        n
+    };
+}
 
 fn main() {
     let p = grid::Point::new(0, 0);
@@ -40,54 +60,41 @@ fn main() {
 
     let mut r = StdRng::seed_from_u64(2);
 
-    let mut grid: grid::Grid<usize, 8> = grid::Grid::new();
-    grid.set(&grid::Point::new(0, 0), 0);
+    let mut grid: grid2::Grid<usize, 128> = grid2::Grid::new();
+    grid.set(&grid2::Point::new(0, 0), 0);
 
-    for _ in 0..512 {
-        let x: isize = r.gen_range(-32..32);
-        let z: isize = r.gen_range(-8..8);
+    for _ in 0..250 {
+        let x: isize = r.gen_range(-7..8);
+        let z: isize = r.gen_range(-7..8);
 
-        grid.set(&grid::Point::new(x, z), 1);
+        grid.set(&grid2::Point::new(x, z), 1);
     }
 
     //
 
     grid.print(|v| v != &0);
 
+    // return;
+
     let start = Instant::now();
 
-    for i in 0..5000 {
-        grid.tick(5, |point| {
-            point.moore_neighbors(1, false)
-        }, |point, neighbors, old| {
-            let mut r = Vec::new();
+    for i in 0..10000 {
+        grid.tick(|point| {
+            &MOORE_NEIGHBORS
+        }, |point, cur, neighbors| {
+            let mut r = Vec::with_capacity(1);
 
             let mut live = neighbors.into_iter().filter(|v| v == &Some(&1)).count();
 
-            match old {
-                None | Some(0) => {
-                    if live == 3 {
-                        r.push(Update::new(Point::copy(point), |_| Some(1)));
-                    }
+            if cur.is_none() || cur == Some(&0) {
+                if live == 3 {
+                    r.push(Update::new(point.copy(), |_| Some(1)));
                 }
-                Some(v) => {
-                    if live < 2 {
-                        r.push(Update::new(Point::copy(point), |_| Some(0)));
-                    } else if live > 3 {
-                        r.push(Update::new(Point::copy(point), |_| Some(0)));
-                    }
+            } else {
+                if live < 2 || live > 3 {
+                    r.push(Update::new(point.copy(), |_| Some(0)));
                 }
             }
-
-            // if value == &0 {
-            //
-            // } else if value == &1 {
-            //     if live < 2 {
-            //         new.set(point, 0);
-            //     } else if live > 3 {
-            //         new.set(point, 0);
-            //     }
-            // }
 
             r
         });
@@ -95,12 +102,15 @@ fn main() {
         // println!("{}", i);
 
         //
+        println!("{}", i);
 
         // if i % 99 == 0 {
-        //     grid.print(|v| v != &0);
+        //     println!("{}", i);
+        // grid.print(|v| v != &0);
         // }
     }
 
-    println!("{:?}", start.elapsed());
+    std::fs::write("out.txt", grid.print(|v| v == &1));
 
+    println!("{:?}", start.elapsed());
 }

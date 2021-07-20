@@ -20,6 +20,13 @@ impl Point {
             z: p.z,
         }
     }
+
+    pub fn shift(&self, o: &Offset) -> Self {
+        Self {
+            x: self.x + o.x,
+            z: self.z + o.z,
+        }
+    }
 }
 
 impl Display for Point {
@@ -31,6 +38,18 @@ impl Display for Point {
 pub struct Offset {
     x: isize,
     z: isize,
+}
+
+impl Display for Offset {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{},{}]", self.x, self.z)
+    }
+}
+
+impl Offset {
+    pub fn new(x: isize, z: isize) -> Self {
+        Self { x, z }
+    }
 }
 
 pub struct GridLength {
@@ -210,9 +229,15 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         (Point::new(min_x, min_z), Point::new(max_x, max_z))
     }
 
+    // Find all subgrid "islands" surrounded by open space
+    // Iterate over these
+    // Pad these
+    // Update the padded ranges, referencing the subgrid for values inside the subgrid and using
+    // lookups for values created from padding
+
     pub fn tick<FVisit, FUpdate>(&mut self, pad: isize, visitor: FVisit, updater: FUpdate)
-        where FVisit: Fn(&Point) -> Vec<Point>,
-              FUpdate: Fn(&Point, Vec<Option<&T>>, Option<&T>) -> Vec<Update<T>>
+        where FVisit: Fn(&Point) -> &Vec<Offset>,
+              FUpdate: Fn(&Point, Option<&T>, Vec<Option<&T>>) -> Vec<Update<T>>
     {
         let mut updates = Vec::new();
 
@@ -221,31 +246,31 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
 
         // Fast
 
-        let mut fast = HashSet::new();
-
-        for (sub_index, sub) in &self.values {
-            let start_x = sub_index.x * Grid::<T, L>::L_I;
-            let start_z = sub_index.z * Grid::<T, L>::L_I;
-
-            for x in 0..Grid::<T, L>::L_I {
-                for z in 0..Grid::<T, L>::L_I {
-                    let point = Point::new(start_x + x, start_z + z);
-                    let value = Some(self.get_in_subgrid(sub, &point));
-
-                    let neighbors = visitor(&point);
-
-                    let mut neighbor_values = Vec::new();
-
-                    for neighbor in neighbors {
-                        neighbor_values.push(self.get(&neighbor));
-                    }
-
-                    updates.append(&mut updater(&point, neighbor_values, value));
-                }
-            }
-
-            fast.insert(sub_index);
-        }
+        // // let mut fast = HashSet::new();
+        //
+        // for (sub_index, sub) in &self.values {
+        //     let start_x = sub_index.x * Grid::<T, L>::L_I;
+        //     let start_z = sub_index.z * Grid::<T, L>::L_I;
+        //
+        //     for x in 0..Grid::<T, L>::L_I {
+        //         for z in 0..Grid::<T, L>::L_I {
+        //             let point = Point::new(start_x + x, start_z + z);
+        //             let value = Some(self.get_in_subgrid(sub, &point));
+        //
+        //             let neighbors = visitor(&point);
+        //
+        //             let mut neighbor_values = Vec::new();
+        //
+        //             for neighbor in neighbors {
+        //                 neighbor_values.push(self.get(&neighbor));
+        //             }
+        //
+        //             updates.append(&mut updater(&point, neighbor_values, value));
+        //         }
+        //     }
+        //
+        //     // fast.insert(sub_index);
+        // }
 
         // Accurate
 
@@ -254,22 +279,20 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         for x in (min.x - pad)..(max.x + pad) {
             for z in (min.z - pad)..(max.z + pad) {
                 let point = Point::new(x, z);
+                let value = self.get(&point);
 
-                let sub_index = point.to_subgrid_index(Grid::<T, L>::L_I);
-                if fast.contains(&sub_index) {
-                    continue;
-                }
+                // let sub_index = point.to_subgrid_index(Grid::<T, L>::L_I);
 
                 let neighbors = visitor(&point);
                 let mut neighbor_values = Vec::new();
 
                 for neighbor in neighbors {
-                    neighbor_values.push(self.get(&neighbor));
+                    neighbor_values.push(self.get(&point.shift(&neighbor)));
                 }
 
                 //
 
-                updates.append(&mut updater(&point, neighbor_values, Some(T::default()).as_ref()));
+                updates.append(&mut updater(&point, value, neighbor_values));
             }
         }
 
@@ -279,11 +302,19 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
             let old = self.get(&update.p);
             let new = (update.f)(old);
 
-            self.set(&update.p, new.unwrap_or(T::default()));
+            if new.is_none() {
+                println!("UNSET: {}", update.p);
+            } else {
+                println!("SET V: {} => {}", update.p, new.as_ref().unwrap());
+            }
+
+            self.set(&update.p, new.unwrap_or_default());
         }
+
+        println!("{} {}", min, max);
     }
 
-    pub fn print<F>(&self, should_display: F) where F: Fn(&T) -> bool {
+    pub fn print<F>(&self, should_display: F) -> String where F: Fn(&T) -> bool {
         let (min_sub, max_sub) = self.find_subgrid_bounds();
         let grid_length = self.find_grid_length();
 
@@ -295,36 +326,39 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
             rows.push(" ".repeat(grid_length.x));
         }
 
-        for sub_x in min_sub.x..max_sub.x + Grid::<T, L>::L_I {
-            for sub_z in min_sub.z..max_sub.z + Grid::<T, L>::L_I {
-                let sub_i = SubGridIndex::new(sub_x, sub_z);
+        let (min, max) = self.find_grid_bounds();
 
-                let start_x = (sub_x - min_sub.x) as usize;
-                let start_z = (sub_z - min_sub.z) as usize;
+        for x in min.x..max.x {
+            for z in min.z..max.z {
+                let point = Point::new(x, z);
+                let value = self.get(&point);
 
-                match self.values.get(&sub_i) {
-                    None => {}
-                    Some(sub) => {
-                        for x in 0..L {
-                            for z in 0..L {
-                                if should_display(sub.get(&SubGridPoint::new(x, z))) {
-                                    let d_x = start_x * L + x;
-                                    let d_z = start_z * L + z;
+                if value.is_some() && should_display(value.unwrap()) {
+                    let x_n = (x - min.x) as usize;
+                    let z_n = (z - min.z) as usize;
 
-                                    rows[d_z].replace_range(d_x..=d_x, "#");
-                                }
-                            }
-                        }
-                    }
+                    rows[z_n].replace_range(x_n..=x_n, "#");
                 }
             }
         }
 
-        println!("+{}+", "-".repeat(grid_length.x));
-        for row in rows {
-            println!("|{}|", row);
+        let mut p = String::new();
+
+        p.push_str(&format!("+{}+\n", "-".repeat(grid_length.x)));
+        for row in &rows {
+            p.push_str(&format!("|{}|\n", row));
         }
-        println!("+{}+", "-".repeat(grid_length.x));
+        p.push_str(&format!("+{}+", "-".repeat(grid_length.x)));
+        p.push_str(&format!("{}, {}", grid_length.x, grid_length.z));
+
+        // println!("+{}+", "-".repeat(grid_length.x));
+        // for row in &rows {
+        //     println!("|{}|", row);
+        // }
+        // println!("+{}+", "-".repeat(grid_length.x));
+        // println!("{}, {}", grid_length.x, grid_length.z);
+
+        p
     }
 
     pub fn get(&self, p: &Point) -> Option<&T> {
@@ -340,6 +374,12 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         let sub = self.get_subgrid_or_expand(p);
 
         sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I))
+    }
+
+    pub fn get_or_expand_clone(&mut self, p: &Point) -> T {
+        let sub = self.get_subgrid_or_expand(p);
+
+        sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I)).clone()
     }
 
     pub fn get_in_subgrid<'a>(&self, sub: &'a SubGrid<T, L>, p: &Point) -> &'a T {
@@ -358,12 +398,38 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         sub.set(&p.to_subgrid_point(Grid::<T, L>::L_I), v);
     }
 
+    // Do not attempt to set a None value to an unallocated grid; it would be T::default() anyway
+    // pub fn set_if_exists(&mut self, p: &Point, v: Option<T>) {
+    //     let sub = self.get_subgrid_mut(p);
+    //     if sub.is_none() && v.is_none() { return; }
+    //
+    //     sub.unwrap().set(&p.to_subgrid_point(Grid::<T, L>::L_I), v.unwrap_or(T::default()));
+    // }
+
     fn get_subgrid(&self, p: &Point) -> Option<&SubGrid<T, L>> {
         self.values.get(&p.to_subgrid_index(Grid::<T, L>::L_I))
     }
 
+    fn get_subgrid_mut(&mut self, p: &Point) -> Option<&mut SubGrid<T, L>> {
+        self.values.get_mut(&p.to_subgrid_index(Grid::<T, L>::L_I))
+    }
+
     fn get_subgrid_or_expand(&mut self, p: &Point) -> &mut SubGrid<T, L> {
-        self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert(SubGrid::new())
+        self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert_with(|| {
+            SubGrid::new()
+        })
+
+        // let index = p.to_subgrid_index(Grid::<T, L>::L_I);
+        // self.values.entry(p.to_subgrid_index(Grid::<T, L>::L_I)).or_insert_with(||{
+        //     println!("Alloc: {}", p);
+        //     SubGrid::new()
+        // })
+        // self.values.entry(index).or_insert_with(|| {
+        //
+        //     let neighbors = index.moore_neighbors(1, false);
+        //
+        //     SubGrid::new()
+        // })
     }
 }
 
@@ -376,6 +442,45 @@ struct SubGridIndex {
 impl SubGridIndex {
     pub fn new(x: isize, z: isize) -> Self {
         Self { x, z }
+    }
+
+    pub fn moore_neighbors(&self, dist: u8, inclusive: bool) -> Vec<SubGridIndex> {
+        let mut r = Vec::new();
+
+        if inclusive {
+            r.push(SubGridIndex { x: self.x, z: self.z });
+        }
+
+        for d in 1..(dist as isize) + 1 {
+            let mut d_x = self.x - d;
+            let mut d_y = self.z - d;
+
+            for _ in 0..d * 2 {
+                r.push(SubGridIndex::new(d_x, d_y));
+                d_x += 1;
+            }
+
+            for _ in 0..d * 2 {
+                r.push(SubGridIndex::new(d_x, d_y));
+                d_y += 1;
+            }
+
+            for _ in 0..d * 2 {
+                r.push(SubGridIndex::new(d_x, d_y));
+                d_x -= 1;
+            }
+
+            for _ in 0..d * 2 {
+                r.push(SubGridIndex::new(d_x, d_y));
+                d_y -= 1;
+            }
+        }
+
+        // for p in &r {
+        //     println!("{} -> {}", self, p);
+        // }
+
+        r
     }
 }
 
