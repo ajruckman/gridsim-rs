@@ -7,10 +7,7 @@ use lazy_static::lazy_static;
 use rand::{Rng, SeedableRng};
 use rand::prelude::StdRng;
 
-use crate::grid2::{Offset, Point, Update};
-
-mod grid;
-mod grid2;
+use grid::{Offset, Point, Update};
 
 lazy_static! {
     static ref MOORE_NEIGHBORS: Vec<Offset> = {
@@ -30,44 +27,44 @@ lazy_static! {
 fn main() {
     let p = grid::Point::new(0, 0);
 
-    println!("Von Neumann neighbors");
-    for i in 1..=3 {
-        println!("{}:", i);
-        for n in p.von_neumann_neighbors(i, false) {
-            println!("\t{}", n);
-        }
-        println!("\t-----");
-        for n in p.von_neumann_neighbors(i, true) {
-            println!("\t{}", n);
-        }
-        println!("");
-    }
-
-    println!("Moore neighbors");
-    for i in 1..=3 {
-        println!("{}:", i);
-        for n in p.moore_neighbors(i, false) {
-            println!("\t{}", n);
-        }
-        println!("\t-----");
-        for n in p.moore_neighbors(i, true) {
-            println!("\t{}", n);
-        }
-        println!("");
-    }
+    // println!("Von Neumann neighbors");
+    // for i in 1..=3 {
+    //     println!("{}:", i);
+    //     for n in p.von_neumann_neighbors(i, false) {
+    //         println!("\t{}", n);
+    //     }
+    //     println!("\t-----");
+    //     for n in p.von_neumann_neighbors(i, true) {
+    //         println!("\t{}", n);
+    //     }
+    //     println!("");
+    // }
+    //
+    // println!("Moore neighbors");
+    // for i in 1..=3 {
+    //     println!("{}:", i);
+    //     for n in p.moore_neighbors(i, false) {
+    //         println!("\t{}", n);
+    //     }
+    //     println!("\t-----");
+    //     for n in p.moore_neighbors(i, true) {
+    //         println!("\t{}", n);
+    //     }
+    //     println!("");
+    // }
 
     //
 
     let mut r = StdRng::seed_from_u64(2);
 
-    let mut grid: grid2::Grid<usize, 128> = grid2::Grid::new();
-    grid.set(&grid2::Point::new(0, 0), 0);
+    let mut grid: grid::Grid<usize, 128> = grid::Grid::new();
+    grid.set(&grid::Point::new(0, 0), 0);
 
     for _ in 0..250 {
         let x: isize = r.gen_range(-7..8);
         let z: isize = r.gen_range(-7..8);
 
-        grid.set(&grid2::Point::new(x, z), 1);
+        grid.set(&grid::Point::new(x, z), 1);
     }
 
     //

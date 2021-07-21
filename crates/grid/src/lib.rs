@@ -112,20 +112,21 @@ impl<T> Update<T>
 
 //
 
-pub struct Grid<T, const L: usize> where T: Default + Clone + Display {
+pub struct Grid<'a, T, const L: usize> where T: Default + Clone + Display {
     values: HashMap<SubGridIndex, SubGrid<T, L>>,
 
     to_scan: Option<Vec<SubGridIndex>>,
-    sub_cache: LruCache<SubGridIndex, &SubGrid<T, L>>,
+    sub_cache: LruCache<SubGridIndex, &'a SubGrid<T, L>>,
 }
 
-impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
+impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
     pub const L_I: isize = L as isize;
 
-    pub fn new() -> Grid<T, L> {
+    pub fn new() -> Grid<'a, T, L> {
         Grid {
             values: HashMap::new(),
             to_scan: None,
+            sub_cache: LruCache::new(3),
         }
     }
 
@@ -153,6 +154,9 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
     ) {
         let mut updates = Vec::new();
 
+        let mut hit = 0;
+        let mut miss = 0;
+
         for sub_index in self.subgrids_to_scan() {
             let sub = self.values.get(&sub_index);
             // println!("{}", sub.is_some());
@@ -171,16 +175,23 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
                     for neighbor_offset in neighbor_offsets {
                         let neighbor_point = point.shift(neighbor_offset);
 
-                        println!("{} in {},{} <{}> ? {}", neighbor_point, start, end, sub.is_some(), neighbor_point.is_in_range(&start, &end));
+                        // println!("{} in {},{} <{}> ? {}", neighbor_point, start, end, sub.is_some(), neighbor_point.is_in_range(&start, &end));
 
                         let value = match neighbor_point.is_in_range(&start, &end) {
                             false => {
+                                miss += 1;
                                 self.get(&neighbor_point)
                             }
                             true => {
                                 match sub {
-                                    None => self.get(&neighbor_point),
-                                    Some(v) => Some(self.get_in_known_subgrid(v, &neighbor_point)),
+                                    None => {
+                                        miss += 1;
+                                        self.get(&neighbor_point)
+                                    },
+                                    Some(v) => {
+                                        hit += 1;
+                                        Some(self.get_in_known_subgrid(v, &neighbor_point))
+                                    },
                                 }
                             }
                         };
@@ -214,6 +225,8 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
 
             self.set(&update.p, new.unwrap_or_default());
         }
+
+        println!("Hit: {} | Miss: {}", hit, miss);
     }
 
     /*
@@ -319,7 +332,8 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
     }
 
     fn get_subgrid(&self, p: &Point) -> Option<&SubGrid<T, L>> {
-        self.values.get(&p.to_subgrid_index(Grid::<T, L>::L_I)).clone()
+        let index = p.to_subgrid_index(Grid::<T, L>::L_I);
+        self.values.get(&index)
     }
 
     fn get_subgrid_or_expand(&mut self, p: &Point) -> &mut SubGrid<T, L> {
@@ -337,7 +351,7 @@ impl<T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
         r
     }
 
-    fn get_in_known_subgrid<'a, 'b>(&self, sub: &'a SubGrid<T, L>, p: &'b Point) -> &'a T {
+    fn get_in_known_subgrid<'b, 'c>(&self, sub: &'b SubGrid<T, L>, p: &'c Point) -> &'b T {
         sub.get(&p.to_subgrid_point(Grid::<T, L>::L_I))
     }
 
@@ -486,4 +500,3 @@ fn allocate_2d<T, const L: usize>() -> [[T; L]; L] where T: Default {
 
     unsafe { std::mem::transmute_copy(&values) }
 }
-
