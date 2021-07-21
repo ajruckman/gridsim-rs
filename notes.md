@@ -5,3 +5,11 @@ After: 25.1
 
 Base: 23.8
 Hybrid: 26.7
+
+
+
+
+----
+
+18.2
+After FxHashMap: 10.8

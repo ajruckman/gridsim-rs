@@ -8,6 +8,7 @@ use rand::{Rng, SeedableRng};
 use rand::prelude::StdRng;
 
 use grid::{Offset, Point, Update};
+use std::ops::Range;
 
 lazy_static! {
     static ref MOORE_NEIGHBORS: Vec<Offset> = {
@@ -24,9 +25,63 @@ lazy_static! {
     };
 }
 
-fn main() {
-    let p = grid::Point::new(0, 0);
+fn bench_divs() {
+    let mut r = StdRng::seed_from_u64(2);
 
+    for i in 0..100 {
+        let l = r.gen_range::<isize, Range<isize>>(-100..100);
+        let r = r.gen_range::<isize, Range<isize>>(-100..100);
+
+        if l == 0 || r == 0 { continue }
+
+        let d = grid::div_neg_isize_3(l, r);
+
+        println!("{} {} -> {}", l, r, d);
+    }
+
+    for i in 0..10000000 {
+        let x = i * i;
+    }
+
+
+    let s1 = Instant::now();
+    for i in 0..100000000 {
+        let l = r.gen_range::<isize, Range<isize>>(-100..100);
+        let r = r.gen_range::<isize, Range<isize>>(-100..100);
+
+        if l == 0 || r == 0 { continue }
+
+        let d = grid::div_neg_isize(l, r);
+    }
+    println!("{:?}", s1.elapsed());
+
+
+    let s2 = Instant::now();
+    for i in 0..100000000 {
+        let l = r.gen_range::<isize, Range<isize>>(-100..100);
+        let r = r.gen_range::<isize, Range<isize>>(-100..100);
+
+        if l == 0 || r == 0 { continue }
+
+        let d = grid::div_neg_isize_2(l, r);
+    }
+    println!("{:?}", s2.elapsed());
+
+    let s3 = Instant::now();
+    for i in 0..100000000 {
+        let l = r.gen_range::<isize, Range<isize>>(-100..100);
+        let r = r.gen_range::<isize, Range<isize>>(-100..100);
+
+        if l == 0 || r == 0 { continue }
+
+        let d = grid::div_neg_isize_3(l, r);
+    }
+    println!("{:?}", s3.elapsed());
+}
+
+fn main() {
+    // let p = grid::Point::new(0, 0);
+    //
     // println!("Von Neumann neighbors");
     // for i in 1..=3 {
     //     println!("{}:", i);
@@ -57,7 +112,9 @@ fn main() {
 
     let mut r = StdRng::seed_from_u64(2);
 
-    let mut grid: grid::Grid<usize, 128> = grid::Grid::new();
+    //
+
+    let mut grid: grid::Grid<usize, 32> = grid::Grid::new();
     grid.set(&grid::Point::new(0, 0), 0);
 
     for _ in 0..250 {
@@ -75,7 +132,7 @@ fn main() {
 
     let start = Instant::now();
 
-    for i in 0..10000 {
+    for i in 0..200 {
         grid.tick(|point| {
             &MOORE_NEIGHBORS
         }, |point, cur, neighbors| {

@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::Index;
-use std::collections::hash_map::Entry;
+
 use lru::LruCache;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 pub struct Point {
     x: isize,
@@ -19,7 +20,7 @@ impl Point {
     pub fn copy(&self) -> Self { Self { x: self.x, z: self.z } }
 
     fn to_subgrid_index(&self, l_i: isize) -> SubGridIndex {
-        SubGridIndex::new(div_neg_isize(self.x, l_i), div_neg_isize(self.z, l_i))
+        SubGridIndex::new(div_neg_isize_3(self.x, l_i), div_neg_isize_3(self.z, l_i))
     }
 
     fn to_subgrid_point(&self, l_i: isize) -> SubGridPoint {
@@ -113,7 +114,7 @@ impl<T> Update<T>
 //
 
 pub struct Grid<'a, T, const L: usize> where T: Default + Clone + Display {
-    values: HashMap<SubGridIndex, SubGrid<T, L>>,
+    values: FxHashMap<SubGridIndex, SubGrid<T, L>>,
 
     to_scan: Option<Vec<SubGridIndex>>,
     sub_cache: LruCache<SubGridIndex, &'a SubGrid<T, L>>,
@@ -124,7 +125,7 @@ impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
 
     pub fn new() -> Grid<'a, T, L> {
         Grid {
-            values: HashMap::new(),
+            values: FxHashMap::default(),
             to_scan: None,
             sub_cache: LruCache::new(3),
         }
@@ -154,8 +155,8 @@ impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
     ) {
         let mut updates = Vec::new();
 
-        let mut hit = 0;
-        let mut miss = 0;
+        // let mut hit = 0;
+        // let mut miss = 0;
 
         for sub_index in self.subgrids_to_scan() {
             let sub = self.values.get(&sub_index);
@@ -179,19 +180,19 @@ impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
 
                         let value = match neighbor_point.is_in_range(&start, &end) {
                             false => {
-                                miss += 1;
+                                // miss += 1;
                                 self.get(&neighbor_point)
                             }
                             true => {
                                 match sub {
                                     None => {
-                                        miss += 1;
+                                        // miss += 1;
                                         self.get(&neighbor_point)
-                                    },
+                                    }
                                     Some(v) => {
-                                        hit += 1;
+                                        // hit += 1;
                                         Some(self.get_in_known_subgrid(v, &neighbor_point))
-                                    },
+                                    }
                                 }
                             }
                         };
@@ -226,7 +227,7 @@ impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
             self.set(&update.p, new.unwrap_or_default());
         }
 
-        println!("Hit: {} | Miss: {}", hit, miss);
+        // println!("Hit: {} | Miss: {}", hit, miss);
     }
 
     /*
@@ -307,7 +308,7 @@ impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
     fn subgrids_to_scan(&mut self) -> Vec<SubGridIndex> {
         match &self.to_scan {
             None => {
-                let mut checked_neighbors = HashSet::new();
+                let mut checked_neighbors = FxHashSet::default();
                 let mut to_scan = Vec::new();
 
                 for (sub_index, sub) in &self.values {
@@ -473,12 +474,21 @@ impl<T, const L: usize> SubGrid<T, L> where T: Default + Clone {
 
 //
 
+// https://stackoverflow.com/a/3042066/9911189
 pub fn div_neg_isize(a: isize, b: isize) -> isize {
     if a >= 0 {
         a / b
     } else {
         (a - b + 1) / b
     }
+}
+
+pub fn div_neg_isize_2(a: isize, b: isize) -> isize {
+    (a - (((a % b) + b) % b)) / b
+}
+
+pub fn div_neg_isize_3(a: isize, b: isize) -> isize {
+    (a / b) + ((a % b) >> 31)
 }
 
 fn allocate_2d<T, const L: usize>() -> [[T; L]; L] where T: Default {

@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 lazy_static = "1.4"
 lru = "0.6"
+rustc-hash = "1.1"
