@@ -132,7 +132,7 @@ fn main() {
 
     let start = Instant::now();
 
-    for i in 0..200 {
+    for i in 0..2000 {
         grid.tick(|point| {
             &MOORE_NEIGHBORS
         }, |point, cur, neighbors| {
@@ -164,7 +164,7 @@ fn main() {
         // }
     }
 
-    std::fs::write("out.txt", grid.print(|v| v == &1));
+    // std::fs::write("out.txt", grid.print(|v| v == &1));
 
     println!("{:?}", start.elapsed());
 }

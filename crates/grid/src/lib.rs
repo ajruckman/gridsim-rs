@@ -1,3 +1,6 @@
+pub mod grid3;
+pub mod grid4;
+
 use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
@@ -113,21 +116,21 @@ impl<T> Update<T>
 
 //
 
-pub struct Grid<'a, T, const L: usize> where T: Default + Clone + Display {
+pub struct Grid<T, const L: usize> where T: Default + Clone + Display {
     values: FxHashMap<SubGridIndex, SubGrid<T, L>>,
 
     to_scan: Option<Vec<SubGridIndex>>,
-    sub_cache: LruCache<SubGridIndex, &'a SubGrid<T, L>>,
+    // sub_cache: LruCache<SubGridIndex, &'a SubGrid<T, L>>,
 }
 
-impl<'a, T, const L: usize> Grid<'a, T, L> where T: Default + Clone + Display {
+impl<'a, T, const L: usize> Grid<T, L> where T: Default + Clone + Display {
     pub const L_I: isize = L as isize;
 
-    pub fn new() -> Grid<'a, T, L> {
+    pub fn new() -> Grid<T, L> {
         Grid {
             values: FxHashMap::default(),
             to_scan: None,
-            sub_cache: LruCache::new(3),
+            // sub_cache: LruCache::new(3),
         }
     }
 
